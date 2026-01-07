@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
-import { Settings, Share2, Activity, Database, Zap, Info, TrendingUp, Clock, DollarSign } from 'lucide-react';
+import { Settings, Share2, Activity, Database, Zap, Info, TrendingUp, Clock, DollarSign, User } from 'lucide-react';
+import { SignedIn, SignedOut, SignInButton, UserButton, useUser } from "@clerk/clerk-react"; 
 import { useRCCStore } from './store'; 
 import RelationalGraph from './RelationalGraph';
 
 function App() {
+  const { user, isSignedIn } = useUser(); 
   const { 
     isPredicting, 
     setPredicting, 
@@ -11,18 +13,13 @@ function App() {
     setCompression,
     rawText,      
     setRawText,
-    currentTime,    // New from Store
-    setCurrentTime, // New from Store
-    getPredictedValue // New from Store
+    currentTime,    
+    setCurrentTime, 
+    getPredictedValue 
   } = useRCCStore();
 
-  // Influence slider tied to global compression level
   const contextValue = compressionLevel;
-
-  // Calculate Market Value based on the active year on the timeline
   const marketValue = getPredictedValue(currentTime);
-
-  // Metrics derived from store state
   const compressionRatio = (1 + (contextValue / 20)).toFixed(1);
   const redundancyFiltered = Math.round(contextValue * 0.85);
   const stabilityIndex = (0.75 + (contextValue / 1000) + (currentTime - 2021)/100).toFixed(2);
@@ -85,11 +82,28 @@ function App() {
               <span className="uppercase tracking-widest text-xs tracking-[0.2em]">Relational Layer</span>
             </div>
             <span className="text-slate-600">|</span>
-            <span className="text-slate-500 text-xs font-mono tracking-widest text-[10px]">YEAR: {currentTime}</span>
+            <span className="text-slate-500 text-xs font-mono tracking-widest text-[10px]">ANALYZING: {currentTime}</span>
           </div>
-          <div className="flex gap-2 text-slate-400">
-            <button className="p-2 hover:bg-slate-800 rounded-md transition-colors"><Share2 size={18}/></button>
-            <button className="p-2 hover:bg-slate-800 rounded-md transition-colors"><Settings size={18}/></button>
+          
+          <div className="flex items-center gap-4">
+            <div className="flex gap-1">
+              <button className="p-2 hover:bg-slate-800 rounded-md transition-colors text-slate-400"><Share2 size={18}/></button>
+              <button className="p-2 hover:bg-slate-800 rounded-md transition-colors text-slate-400"><Settings size={18}/></button>
+            </div>
+
+            <div className="h-8 w-[1px] bg-slate-800 mx-2"></div>
+
+            {/* 👤 OPTIONAL AUTH SECTION */}
+            <SignedOut>
+              <SignInButton mode="modal">
+                <button className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-slate-700 hover:bg-slate-800 text-xs font-semibold text-slate-300 transition-all">
+                  <User size={14} /> Login
+                </button>
+              </SignInButton>
+            </SignedOut>
+            <SignedIn>
+              <UserButton appearance={{ elements: { userButtonAvatarBox: "h-8 w-8" } }} />
+            </SignedIn>
           </div>
         </header>
 
@@ -97,7 +111,7 @@ function App() {
           <RelationalGraph />
         </div>
 
-        {/* 4. BOTTOM PANEL: Temporal Timeline (5-Year Predictor) */}
+        {/* 4. BOTTOM PANEL: Temporal Timeline */}
         <footer className="h-24 border-t border-slate-800 bg-slate-900/90 px-8 flex items-center gap-8 backdrop-blur-md">
           <div className="flex flex-col items-center gap-1 min-w-[140px]">
             <Clock className="text-indigo-400" size={20} />
@@ -106,9 +120,9 @@ function App() {
           
           <div className="flex-1 flex flex-col gap-2">
             <div className="flex justify-between text-slate-500 px-2 font-mono text-[10px] tracking-widest">
-              <span>2021 (Start)</span>
-              <span className="text-indigo-400 font-bold">ANALYZING: {currentTime}</span>
-              <span>2026 (Prediction)</span>
+              <span>2021</span>
+              <span className="text-indigo-400 font-bold italic">TARGET YEAR: {currentTime}</span>
+              <span>2026</span>
             </div>
             <input 
               type="range" 
@@ -116,7 +130,7 @@ function App() {
               step="1"
               value={currentTime}
               onChange={(e) => setCurrentTime(parseInt(e.target.value))}
-              className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500 hover:accent-indigo-400 transition-all" 
+              className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500" 
             />
           </div>
           
@@ -127,12 +141,12 @@ function App() {
             ${isPredicting ? 'bg-slate-800 text-slate-500 border border-slate-700' : 'bg-indigo-600 hover:bg-indigo-500 shadow-xl shadow-indigo-500/20 active:scale-95'}`}
           >
             <Zap size={14} className={isPredicting ? "animate-pulse text-cyan-400" : ""} /> 
-            {isPredicting ? "PROJECTION IN PROGRESS..." : "RUN FULL PREDICTION"}
+            {isPredicting ? "RUNNING SIMULATION..." : "RUN FULL PREDICTION"}
           </button>
         </footer>
       </main>
 
-      {/* 3. RIGHT PANEL: Metrics & Financial Prediction */}
+      {/* 3. RIGHT PANEL: Metrics */}
       <aside className="w-72 border-l border-slate-800 bg-slate-900/50 p-6 flex flex-col shrink-0">
         <div className="flex items-center gap-2 mb-8 text-white">
           <Activity className="text-emerald-400" size={24} />
@@ -140,13 +154,12 @@ function App() {
         </div>
 
         <div className="space-y-6">
-          {/* Predictive Value Card */}
           <div className="bg-emerald-500/10 p-5 rounded-2xl border border-emerald-500/30 shadow-lg shadow-emerald-500/5">
             <p className="text-[10px] font-bold text-emerald-500 uppercase tracking-widest mb-1 flex items-center gap-1">
               <DollarSign size={10}/> Projected Market Value
             </p>
             <p className="text-4xl font-mono font-bold text-white tracking-tighter">${marketValue}</p>
-            <p className="text-[9px] text-slate-500 mt-2 font-medium">Relational Valuation at T-{currentTime}</p>
+            <p className="text-[9px] text-slate-500 mt-2 font-medium uppercase tracking-tight">Valuation @ T-{currentTime}</p>
           </div>
 
           <div className="bg-slate-800/50 p-5 rounded-2xl border border-slate-700">
@@ -168,9 +181,9 @@ function App() {
                 <span className="text-sm font-mono text-slate-200">{stabilityIndex}</span>
               </div>
               <div className="flex justify-between items-end">
-                <span className="text-[10px] text-slate-500 font-medium tracking-tight">Market Maturity</span>
+                <span className="text-[10px] text-slate-500 font-medium tracking-tight">Market State</span>
                 <span className="text-sm font-mono text-emerald-400">
-                   {currentTime < 2024 ? 'Exploratory' : 'Stable'}
+                   {currentTime < 2024 ? 'Developing' : 'Optimized'}
                 </span>
               </div>
             </div>
@@ -179,7 +192,11 @@ function App() {
 
         <div className="mt-auto p-4 bg-cyan-950/10 border border-cyan-900/30 rounded-lg">
            <p className="text-[10px] text-cyan-600 leading-relaxed italic text-center">
-             "Prediction is a function of relational drift over the temporal axis."
+             {isSignedIn ? (
+               <>Logged in as: <span className="text-cyan-400 font-medium">{user?.firstName || 'Analyst'}</span></>
+             ) : (
+               <>Running in <span className="text-cyan-400 font-medium tracking-widest">GUEST MODE</span></>
+             )}
            </p>
         </div>
       </aside>
