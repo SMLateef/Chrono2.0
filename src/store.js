@@ -1,72 +1,135 @@
 import { create } from 'zustand';
 
-// Simple parser utility to generate nodes from raw text
-const parseInputToNodes = (text) => {
-  if (!text) return { nodes: [], edges: [] };
-  
-  const tokens = text.split(/\s+/).filter(word => word.length > 3);
-  const uniqueEntities = [...new Set(tokens.map(t => t.replace(/[.,]/g, '')))].slice(0, 6);
-  
-  const nodes = uniqueEntities.map((label, index) => ({
-    id: `node-${index}`,
-    type: 'rccNode',
-    data: { label: label.charAt(0).toUpperCase() + label.slice(1) },
-    position: { x: index * 180, y: (index % 2 === 0 ? 50 : -50) }, 
-  }));
+// Current USD to INR conversion rate (Jan 2026)
+const USD_TO_INR = 89.94; 
 
+/**
+ * Normalizes values to a Y-coordinate system
+ * @param {number} value - The raw price/value
+ * @param {number} min - Minimum value in the set
+ * @param {number} max - Maximum value in the set
+ * @param {number} height - The total height of the graph area
+ */
+const getYCoordinate = (value, min, max, height = 400) => {
+  if (max === min) return height / 2;
+  // We subtract from height because SVG/ReactFlow (0,0) is top-left
+  return height - ((value - min) / (max - min)) * height;
+};
+
+const processMarketDynamics = (rawData) => {
+  const volatilityMap = {};
+  const nodes = [];
   const edges = [];
-  for (let i = 0; i < nodes.length - 1; i++) {
-    edges.push({
-      id: `edge-${i}`,
-      source: nodes[i].id,
-      target: nodes[i + 1].id,
-      animated: true,
-      style: { stroke: '#06b6d4' }
-    });
-  }
+  
+  // Calculate INR values and min/max for coordinate mapping
+  const pointsWithINR = rawData.map(p => ({ ...p, valueINR: p.value * USD_TO_INR }));
+  const inrValues = pointsWithINR.map(p => p.valueINR);
+  const minVal = Math.min(...inrValues);
+  const maxVal = Math.max(...inrValues);
 
-  return { nodes, edges };
+  pointsWithINR.forEach((point, i) => {
+    let status = "Stable";
+    let score = 20;
+
+    if (i > 0) {
+      const change = Math.abs((point.value - pointsWithINR[i-1].value) / pointsWithINR[i-1].value);
+      if (change > 0.40) { status = "Rupture"; score = 95; }
+      else if (change > 0.15) { status = "Volatile"; score = 55; }
+    }
+
+    volatilityMap[point.year] = { 
+      score, 
+      status, 
+      valueINR: point.valueINR,
+      desc: status === "Rupture" ? "Significant Valuation Breach" : "Normal Market Flow" 
+    };
+
+    // --- ACCURATE XY PLOTTING ---
+    // X-axis: Time progression (250px intervals)
+    // Y-axis: Precise Valuation height in INR
+    nodes.push({
+      id: `n${point.year}`,
+      type: 'rccNode',
+      data: { 
+        label: `${point.year}`,
+        valueDisplay: new Intl.NumberFormat('en-IN', {
+            style: 'currency',
+            currency: 'INR',
+            maximumFractionDigits: 0
+        }).format(point.valueINR),
+        isRupture: status === "Rupture"
+      },
+      position: { 
+        x: i * 250, 
+        y: getYCoordinate(point.valueINR, minVal, maxVal) 
+      }
+    });
+
+    if (i > 0) {
+      edges.push({
+        id: `e${i}`,
+        source: `n${pointsWithINR[i-1].year}`,
+        target: `n${point.year}`,
+        animated: status === "Rupture",
+        style: { stroke: status === "Rupture" ? "#ef4444" : "#06b6d4", strokeWidth: 2 }
+      });
+    }
+  });
+
+  return { volatilityMap, nodes, edges, pointsWithINR };
 };
 
 export const useRCCStore = create((set, get) => ({
-  // --- STATE ---
-  compressionLevel: 0,
+  rawText: "",
   isPredicting: false,
-  currentTime: 2021, 
-  rawText: "Doctor prescribes Medicine to Patient",
-  graphData: parseInputToNodes("Doctor prescribes Medicine to Patient"),
-
-  // --- ACTIONS ---
-  setCompression: (val) => set({ compressionLevel: val }),
-  
-  setPredicting: (val) => set({ isPredicting: val }),
+  currentTime: 2021,
+  graphData: { nodes: [], edges: [] },
+  volatilityData: {}, 
+  historicalPoints: [], 
 
   setCurrentTime: (year) => set({ currentTime: year }),
+  setCompression: (val) => set({ compressionLevel: val }),
 
-  setRawText: (text) => set({ 
-    rawText: text,
-    graphData: parseInputToNodes(text) 
-  }),
+  analyzeTopic: async (topic) => {
+    if (!topic) return;
+    set({ isPredicting: true, rawText: topic });
 
-  // --- ANALYTICAL LOGIC ---
-  getPredictedValue: (year) => {
-    const { graphData, compressionLevel } = get();
-    const baseValue = 1250.00; 
-    const timeFactor = (year - 2021) * 0.15; 
-    const efficiencyFactor = (compressionLevel / 100) * 0.25;
-    const complexityFactor = graphData.nodes.length * 0.05;
+    try {
+      // Simulate/Fetch Data
+      const rawData = await simulateInternetFetch(topic); 
+      const { volatilityMap, nodes, edges, pointsWithINR } = processMarketDynamics(rawData);
 
-    const totalValue = baseValue * (1 + timeFactor + efficiencyFactor + complexityFactor);
-    
-    return totalValue.toLocaleString(undefined, {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2
-    });
+      set({ 
+        historicalPoints: pointsWithINR,
+        volatilityData: volatilityMap,
+        graphData: { nodes, edges },
+        isPredicting: false 
+      });
+    } catch (error) {
+      console.error("Analysis Failed", error);
+      set({ isPredicting: false });
+    }
   },
 
-  resetSystem: () => set({
-    compressionLevel: 0,
-    currentTime: 2021,
-    isPredicting: false
-  })
-})); // <-- This closes the create function
+  getPredictedValue: (year) => {
+    const data = get().volatilityData[year];
+    if (!data) return "₹0.00";
+    return new Intl.NumberFormat('en-IN', {
+      style: 'currency',
+      currency: 'INR',
+      maximumFractionDigits: 2
+    }).format(data.valueINR);
+  }
+}));
+
+async function simulateInternetFetch(topic) {
+  await new Promise(r => setTimeout(r, 1200));
+  return [
+    { year: 2021, value: 100 + Math.random() * 20 },
+    { year: 2022, value: 250 + Math.random() * 50 }, 
+    { year: 2023, value: 210 + Math.random() * 30 },
+    { year: 2024, value: 115 + Math.random() * 20 }, 
+    { year: 2025, value: 380 + Math.random() * 60 },
+    { year: 2026, value: 440 + Math.random() * 40 }
+  ];
+}
