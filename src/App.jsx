@@ -7,7 +7,7 @@ import {
 import { SignedIn, SignedOut, SignInButton, UserButton, useUser } from "@clerk/clerk-react"; 
 import { useRCCStore } from './store'; 
 import RelationalGraph from './RelationalGraph';
-import FaultLog from './components/FaultLog'; // <--- New Component
+import FaultLog from './components/faultlog'; // <--- New Component
 
 function App() {
   const { user, isSignedIn } = useUser(); 
