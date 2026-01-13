@@ -1,108 +1,59 @@
-import React, { useMemo, useEffect } from 'react';
-import ReactFlow, { Background, Controls } from 'reactflow';
-import { useRCCStore } from './store';
-import RCCNode from './RCCNode';
-import ChronoChart from './ChronoChart'; // Import the high-accuracy time-series
+import React, { useMemo } from 'react';
+import ReactFlow, { 
+  Background, 
+  Controls, 
+  applyEdgeChanges, 
+  applyNodeChanges 
+} from 'reactflow';
 import 'reactflow/dist/style.css';
+import { useRCCStore } from './store';
 
-const nodeTypes = { rccNode: RCCNode };
+// Custom Node to display Metro Governance Data
+const CityNode = ({ data }) => (
+  <div className={`px-4 py-3 shadow-xl rounded-xl border-2 transition-all duration-500 ${
+    data.isRupture 
+    ? 'bg-red-950/40 border-red-500 shadow-red-500/20' 
+    : 'bg-slate-900/80 border-emerald-500/50 shadow-emerald-500/10'
+  }`}>
+    <div className="flex flex-col items-center gap-1">
+      <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+        {data.compliance || 'AUDITING'}
+      </span>
+      <span className="text-sm font-bold text-white">{data.label}</span>
+      <div className={`mt-1 h-1 w-full rounded-full bg-slate-800 overflow-hidden`}>
+         <div 
+           className={`h-full ${data.isRupture ? 'bg-red-500' : 'bg-emerald-500'}`} 
+           style={{ width: `${data.faultIntensity}%` }}
+         />
+      </div>
+      <span className="text-[9px] font-mono text-slate-400 mt-1">{data.valueDisplay}</span>
+    </div>
+  </div>
+);
+
+const nodeTypes = { rccNode: CityNode };
 
 export default function RelationalGraph() {
-  const { 
-    graphData, 
-    compressionLevel, 
-    isPredicting, 
-    setCompression, 
-    setPredicting,
-    setCurrentTime,
-    volatilityData,
-    currentTime
-  } = useRCCStore();
+  const { graphData, setSelectedCity } = useRCCStore();
 
-  // 1. AUTOMATION LOGIC
-  // Syncs the timeline and compression during the 'Full Projection' sequence
-  useEffect(() => {
-    let interval;
-    if (isPredicting) {
-      let progress = 0;
-      let startYear = 2021;
-      
-      interval = setInterval(() => {
-        progress += 2; 
-        setCompression(progress);
-        
-        // Sync time axis with animation progress
-        if (progress % 20 === 0 && startYear < 2026) {
-          startYear++;
-          setCurrentTime(startYear);
-        }
-        
-        if (progress >= 100) {
-          clearInterval(interval);
-          setPredicting(false); 
-        }
-      }, 80); 
-    }
-    return () => clearInterval(interval);
-  }, [isPredicting, setCompression, setPredicting, setCurrentTime]);
-
-  // 2. TOPOLOGY TRANSFORMATION
-  const displayData = useMemo(() => {
-    const currentStatus = volatilityData[currentTime]?.status;
-
-    // If a rupture is detected at this time, add jitter/volatility to nodes
-    const dynamicNodes = graphData.nodes.map((node, index) => {
-      const jitter = currentStatus === "Rupture" ? (Math.random() - 0.5) * 40 : 0;
-      
-      return {
-        ...node,
-        position: {
-          x: node.position.x + (compressionLevel * (index % 2 === 0 ? 0.2 : -0.2)) + jitter,
-          y: node.position.y + jitter
-        },
-        // Visual feedback for rupture state on nodes
-        data: { 
-          ...node.data, 
-          isRupture: currentStatus === "Rupture" 
-        }
-      };
-    });
-
-    return { nodes: dynamicNodes, edges: graphData.edges };
-  }, [graphData, compressionLevel, volatilityData, currentTime]);
+  const onNodeClick = (event, node) => {
+    setSelectedCity(node.data.label);
+  };
 
   return (
-    <div className="w-full h-full bg-slate-950 relative overflow-hidden">
-      
-      {/* LAYER 0: The Highly Accurate Time-Series Plot (Background) */}
-      <div className="absolute inset-0 z-0 pointer-events-none">
-        <ChronoChart />
-      </div>
-
-      {/* LAYER 1: Relational Topology (Foreground) */}
-      <div className="absolute inset-0 z-10">
-        <ReactFlow 
-          nodes={displayData.nodes} 
-          edges={displayData.edges} 
-          nodeTypes={nodeTypes} 
-          fitView
-          // Precision settings: prevent accidental zoom from breaking the visual sync
-          minZoom={0.5}
-          maxZoom={1.5}
-          zoomOnScroll={false}
-          panOnDrag={true}
-          elementsSelectable={true}
-        >
-          {/* Subtle dots background to give depth between the chart and nodes */}
-          <Background color="#0f172a" variant="dots" gap={25} size={1} />
-          <Controls showInteractive={false} className="bg-slate-900 border-slate-700 fill-slate-400" />
-        </ReactFlow>
-      </div>
-
-      {/* OPTIONAL: Scan-line overlay for "AI Processing" aesthetic */}
-      {isPredicting && (
-        <div className="absolute inset-0 pointer-events-none bg-gradient-to-b from-transparent via-cyan-500/5 to-transparent h-20 w-full animate-scan z-20" />
-      )}
+    <div className="w-full h-full">
+      <ReactFlow
+        nodes={graphData.nodes}
+        edges={graphData.edges}
+        nodeTypes={nodeTypes}
+        onNodeClick={onNodeClick}
+        fitView
+        // Style the canvas for a "Grid Auditor" feel
+        style={{ background: 'transparent' }}
+      >
+        <Background color="#1e293b" gap={20} size={1} />
+        <Controls showInteractive={false} className="bg-slate-900 border-slate-800 fill-slate-400" />
+      </ReactFlow>
     </div>
   );
 }

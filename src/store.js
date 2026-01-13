@@ -1,149 +1,121 @@
 import { create } from 'zustand';
+import { getUrbanVerdict } from './services/aiAgent'; 
 
-const USD_TO_INR = 89.94;
-
-const getYCoordinate = (value, min, max, height = 400) => {
-  if (max === min) return height / 2;
-  return height - ((value - min) / (max - min)) * height;
+/**
+ * Normalizes scores (0-100) to the Y-axis.
+ */
+const getYCoordinate = (score, height = 400) => {
+  return height - (score / 100) * height;
 };
 
 /**
- * AI Reasoning Engine: Generates text justifications for market moves.
- * Ensures transparency and adherence to ethical constraints.
+ * Logic Engine: Converts city telemetry into governance status and graph nodes.
  */
-const generateRationales = (current, previous, topic) => {
-  const reasons = [];
-  const pctChange = previous ? ((current - previous) / previous) * 100 : 0;
-  const absChange = Math.abs(pctChange);
-
-  // 1. Quantitative Analysis
-  if (absChange > 40) {
-    reasons.push(`Structural Break detected: Price deviated by ${pctChange.toFixed(1)}%, exceeding the safety threshold.`);
-  } else if (absChange > 15) {
-    reasons.push(`Market Volatility: Minor drift of ${pctChange.toFixed(1)}% observed.`);
-  } else {
-    reasons.push("Stable Trajectory: Valuation follows standard organic growth patterns.");
-  }
-
-  // 2. Ethical & Physical Backing Logic
-  if (topic.toLowerCase().includes('gold')) {
-    reasons.push("Verification: Asset value is tethered to physical bullion reserves.");
-    reasons.push("Halal Compliance: No speculative interest-rate (Riba) arbitrage detected in this movement.");
-  } else {
-    reasons.push("Compliance Check: Movement analyzed for non-speculative drivers.");
-  }
-
-  return reasons;
-};
-
-const processMarketDynamics = (rawData, topic) => {
-  const volatilityMap = {};
+const processUrbanDynamics = (enrichedData) => {
+  const cityMetrics = {};
   const nodes = [];
   const edges = [];
   
-  const pointsWithINR = rawData.map(p => ({ ...p, valueINR: p.value * USD_TO_INR }));
-  const inrValues = pointsWithINR.map(p => p.valueINR);
-  const minVal = Math.min(...inrValues);
-  const maxVal = Math.max(...inrValues);
+  enrichedData.forEach((city, i) => {
+    const { metrics } = city;
 
-  pointsWithINR.forEach((point, i) => {
-    let status = "Stable";
-    let score = 20;
-    const prevPoint = i > 0 ? pointsWithINR[i - 1] : null;
+    // 1. COMPOSITE FAULT SCORE CALCULATION
+    // Higher Score = Poorer Governance. 
+    // We normalize each metric to a 0-100 scale then apply weights.
+    const faultScore = Math.min(100, (
+        (metrics.aqi / 500) * 30 +        // 30% Weight: Environment
+        (metrics.transport / 60) * 25 +   // 25% Weight: Infrastructure
+        (metrics.crime / 100) * 20 +      // 20% Weight: Safety
+        (metrics.poverty / 50) * 15 +     // 15% Weight: Social
+        (Math.max(0, 10 - metrics.growth) * 1.5) // 10% Weight: Economic Stagnation
+    ));
 
-    if (prevPoint) {
-      const change = Math.abs((point.value - prevPoint.value) / prevPoint.value);
-      if (change > 0.40) { status = "Rupture"; score = 95; }
-      else if (change > 0.15) { status = "Volatile"; score = 55; }
-    }
+    const status = faultScore > 70 ? "Critical" : faultScore > 40 ? "Strained" : "Stable";
 
-    // Generate the "Explainable Log"
-    const reasons = generateRationales(point.value, prevPoint?.value, topic);
-
-    volatilityMap[point.year] = { 
-      score, 
+    // 2. DATA MAPPING FOR STATE
+    cityMetrics[city.name.toLowerCase()] = { 
+      score: faultScore.toFixed(1), 
       status, 
-      valueINR: point.valueINR,
-      reasons, // The "Why" factor stored here
-      desc: status === "Rupture" ? "Significant Valuation Breach" : "Normal Market Flow" 
+      metrics: city.metrics,
+      aiVerdict: city.aiVerdict, 
+      reasons: city.aiVerdict?.reasons || ["Audit trail synchronized."]
     };
 
+    // 3. GRAPH TOPOLOGY
     nodes.push({
-      id: `n${point.year}`,
+      id: city.id,
       type: 'rccNode',
       data: { 
-        year: point.year,
-        label: `${point.year}`,
-        valueDisplay: new Intl.NumberFormat('en-IN', {
-            style: 'currency',
-            currency: 'INR',
-            maximumFractionDigits: 0
-        }).format(point.valueINR),
-        isRupture: status === "Rupture"
+        label: city.name,
+        valueDisplay: `FAULT_INDEX: ${faultScore.toFixed(1)}%`,
+        faultIntensity: faultScore,
+        isRupture: status === "Critical",
+        compliance: city.aiVerdict?.compliance
       },
-      position: { x: i * 250, y: getYCoordinate(point.valueINR, minVal, maxVal) }
+      // Quadrant Positioning based on i (X) and Governance Health (Y)
+      position: { x: i * 350, y: getYCoordinate(faultScore) }
     });
 
     if (i > 0) {
       edges.push({
         id: `e${i}`,
-        source: `n${pointsWithINR[i-1].year}`,
-        target: `n${point.year}`,
-        animated: status === "Rupture",
-        style: { stroke: status === "Rupture" ? "#ef4444" : "#06b6d4", strokeWidth: 2 }
+        source: enrichedData[i-1].id,
+        target: city.id,
+        animated: status === "Critical",
+        style: { stroke: status === "Critical" ? "#ef4444" : "#10b981", strokeWidth: 2 }
       });
     }
   });
 
-  return { volatilityMap, nodes, edges, pointsWithINR };
+  return { cityMetrics, nodes, edges };
 };
 
 export const useRCCStore = create((set, get) => ({
-  rawText: "",
   isPredicting: false,
-  currentTime: 2021,
+  selectedCity: "Mumbai", 
   graphData: { nodes: [], edges: [] },
   volatilityData: {}, 
-  historicalPoints: [], 
 
-  setCurrentTime: (year) => set({ currentTime: year }),
-  setCompression: (val) => set({ compressionLevel: val }),
+  // Sets the global focus on a specific metro
+  setSelectedCity: (cityName) => set({ selectedCity: cityName }),
 
-  analyzeTopic: async (topic) => {
-    if (!topic) return;
-    set({ isPredicting: true, rawText: topic });
+  analyzeMetros: async () => {
+    set({ isPredicting: true });
 
     try {
-      const rawData = await simulateInternetFetch(topic); 
-      // Pass topic to the dynamics processor for contextual reasoning
-      const { volatilityMap, nodes, edges, pointsWithINR } = processMarketDynamics(rawData, topic);
+      // 1. FETCH: Telemetry from cities
+      const rawData = await simulateUrbanDataFetch(); 
+
+      // 2. ENRICH: Parallel AI Auditing for each city
+      const enrichedData = await Promise.all(rawData.map(async (city) => {
+        const verdict = await getUrbanVerdict(city.name, city.metrics);
+        return { ...city, aiVerdict: verdict };
+      }));
+
+      // 3. PROCESS: Generate final metrics and graph state
+      const { cityMetrics, nodes, edges } = processUrbanDynamics(enrichedData);
 
       set({ 
-        historicalPoints: pointsWithINR,
-        volatilityData: volatilityMap,
+        volatilityData: cityMetrics,
         graphData: { nodes, edges },
         isPredicting: false 
       });
     } catch (error) {
-      console.error("Analysis Failed", error);
+      console.error("Critical State Failure:", error);
       set({ isPredicting: false });
     }
-  },
-
-  getPredictedValue: (year) => {
-    const data = get().volatilityData[year];
-    return data ? new Intl.NumberFormat('en-IN', {
-      style: 'currency', currency: 'INR', maximumFractionDigits: 2
-    }).format(data.valueINR) : "₹0.00";
   }
 }));
 
-// Placeholder for your API logic
-async function simulateInternetFetch(topic) {
+/**
+ * Institutional Data Mock for 4 Metros
+ */
+async function simulateUrbanDataFetch() {
   await new Promise(r => setTimeout(r, 1200));
   return [
-    { year: 2021, value: 100 }, { year: 2022, value: 250 }, 
-    { year: 2023, value: 210 }, { year: 2024, value: 115 }, 
-    { year: 2025, value: 380 }, { year: 2026, value: 440 }
+    { id: 'mumbai', name: 'Mumbai', metrics: { crime: 42, poverty: 20, aqi: 160, transport: 45, growth: 7.2 } },
+    { id: 'delhi', name: 'Delhi', metrics: { crime: 58, poverty: 15, aqi: 380, transport: 50, growth: 6.8 } },
+    { id: 'bangalore', name: 'Bangalore', metrics: { crime: 30, poverty: 12, aqi: 95, transport: 55, growth: 8.4 } },
+    { id: 'hyderabad', name: 'Hyderabad', metrics: { crime: 28, poverty: 18, aqi: 110, transport: 35, growth: 7.9 } }
   ];
 }
